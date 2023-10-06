@@ -222,7 +222,7 @@ async def async_cmd_exec(
         try:
             print("Executing commands for", ip)
             result = await asyncio.create_subprocess_shell(
-                f"ssh {user}@{ip} {cmd}",
+                f"ssh -o StrictHostKeychecking=no {user}@{ip} '{cmd}'",
                 shell=True,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
@@ -252,7 +252,7 @@ async def async_cmd_exec(
             try:
                 print("Executing commands for", ip)
                 result = await asyncio.create_subprocess_shell(
-                    f"ssh {user}@{ip} {c}",
+                    f"ssh -o StrictHostKeychecking=no {user}@{ip} '{c}'",
                     shell=True,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
