@@ -1,16 +1,3 @@
-# py4ops
-
-A python Library for Automating Tasks on remote hosts.
-
-Example CLI usage:
-
-```bash
-py4ops run -i example_inventories/all_inv.yaml -cl "ls" -u ubuntu -a -ct 2 -et 2 -c
-```
-
-Example Library usage:
-
-```python
 from py4ops import inv_import, exec_sync_main_pipeline, exec_async_main_pipeline
 import asyncio
 
@@ -48,4 +35,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-```

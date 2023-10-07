@@ -6,6 +6,9 @@ import os
 from typing import Union, List
 import yaml
 
+import paramiko
+import asyncssh
+
 from ._checkers import is_valid_ip_address, is_valid_ipv4_address, is_valid_ipv6_address, check_ssh
 
 
@@ -143,74 +146,83 @@ def inv_import(inv: Union[str, dict, list, object]):
         raise TypeError("The inventory must be a dictionary, a list or a string.")
     
 def sync_cmd_exec(
-    user: str,
     ip: str,
     cmd: Union[str, List[str]],
+    user: Union[str, None] = None,
+    password: Union[str, None]=None,
+    conn_timeout: Union[int, None]=None,
+    exec_timeout: Union[int, None]=None,
     strict=True,
     check_ssh_conn=True,
-    vm_name=None
+    vm_name=None,
+    log_to_console=True,
+    log_to_file=False,
     ):
     """Execute a command synchronously."""
     
     if check_ssh_conn:
-        if check_ssh(ip) is False:
-            if strict:
-                raise ConnectionError(f"Cannot connect to {ip}")
-            else:
-                print(f"Cannot connect to {ip}, skipping...")
-                return
+         if check_ssh(server_ip=ip, timeout=conn_timeout) is False:
+             if strict:
+                 raise ConnectionError(f"Cannot connect to {ip}")
+             else:
+                 print(f"Cannot connect to {ip}, skipping...")
+                 return
         
     if isinstance(cmd, str):
         try:
-            print("Executing commands for", ip)
-            subprocess.run(
-                f"ssh {user}@{ip} {cmd}",
-                check=True,
-                shell=True
-                )
-        except subprocess.CalledProcessError as e:
-            print(f"Error executing command: {e}")
-            print(f"{ip}")
-            if strict:
-                raise e
+            with paramiko.SSHClient() as client:
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.load_system_host_keys()
+                client.connect(hostname=ip, username=user, password=password, timeout=conn_timeout)
+                print("Executing commands for", ip)
+                (stdin, stdout, stderr) = client.exec_command(cmd, timeout=exec_timeout)
+                
+                if log_to_console:
+                    output = stdout.read()
+                    print(str(output, 'utf8'))
         except Exception as e:
-            print(e)
+            print(f"Error executing command on {ip}: {e}")
             if strict:
                 raise e
             
     elif isinstance(cmd, list):
         for c in cmd:
             try:
-                print("Executing commands for", ip)
-                subprocess.run(
-                    f"ssh {user}@{ip} {c}",
-                    check=True,
-                    shell=True
-                    )
-            except subprocess.CalledProcessError as e:
-                print(f"Error executing command: {e}")
-                print(f"{ip}")
-                if strict:
-                    raise e
+                with paramiko.SSHClient() as client:
+                    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    client.load_system_host_keys()
+                    client.connect(hostname=ip, username=user, password=password)
+                    print("Executing commands for", ip)
+                    (stdin, stdout, stderr) = client.exec_command(c, timeout=exec_timeout)
+                    
+                    if log_to_console:
+                        output = stdout.read()
+                        print(str(output, 'utf8'))
             except Exception as e:
-                print(e)
+                print(f"Error executing command on {ip}: {e}")
                 if strict:
                     raise e
     else:
+        print(cmd)
         raise TypeError("The command must be a string or a list of strings.")
     
 async def async_cmd_exec(
-    user: str,
     ip: str,
     cmd: Union[str, List[str]],
+    user: Union[str, None]=None,
+    password: Union[str, None]=None,
+    conn_timeout: Union[int, None]=None,
+    exec_timeout: Union[int, None]=None,
     strict=True,
     check_ssh_conn=True,
-    vm_name=None
+    vm_name=None,
+    log_to_console=True,
+    log_to_file=False,
     ):
     """Execute a command asynchronously."""
     
     if check_ssh_conn:
-        if check_ssh(ip) is False:
+        if check_ssh(server_ip=ip, timeout=conn_timeout) is False:
             if strict:
                 raise ConnectionError(f"Cannot connect to {ip}")
             else:
@@ -220,28 +232,25 @@ async def async_cmd_exec(
     if isinstance(cmd, str):
         
         try:
-            print("Executing commands for", ip)
-            result = await asyncio.create_subprocess_shell(
-                f"ssh -o StrictHostKeychecking=no {user}@{ip} '{cmd}'",
-                shell=True,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await result.communicate()
-            if result.returncode == 0:
-                print(f"Command success for -> {ip} - {vm_name}")
-                print(stdout.decode())
-                print(stderr.decode())
-                #with open("success_commands.txt", "a") as success_file:
-                    #success_file.write(f"Docker user added -> {ip} - {vm_name}\n")
-            else:
-                print(f"Error executing command for {ip} - {vm_name}:")
-                print("STDOUT:")
-                print(stdout.decode())
-                print("STDERR:")
-                print(stderr.decode())
-                #with open("error_commands.txt", "a") as error_file:
-                    #error_file.write(f"Error for {ip} - {vm_name}\n")
+            async with asyncssh.connect(host=ip, username=user, password=password) as client:
+                print("Executing commands for", ip)
+                result = await client.run(cmd, check=True, timeout=exec_timeout)
+                stdout, stderr = result.stdout, result.stderr
+                if result.returncode == 0:
+                    print(f"Command success for -> {ip} - {vm_name}")
+                    if log_to_console:
+                        print(stdout)
+                        # print(stderr)
+                    #with open("success_commands.txt", "a") as success_file:
+                        #success_file.write(f"Docker user added -> {ip} - {vm_name}\n")
+                else:
+                    print(f"Error executing command for {ip} - {vm_name}:")
+                    # print("STDOUT:")
+                    # print(stdout)
+                    # print("STDERR:")
+                    # print(stderr)
+                    #with open("error_commands.txt", "a") as error_file:
+                        #error_file.write(f"Error for {ip} - {vm_name}\n")
         except Exception as e:
             print(f"Exception for {ip}: {e}")
             
@@ -250,72 +259,89 @@ async def async_cmd_exec(
         
         for c in cmd:
             try:
-                print("Executing commands for", ip)
-                result = await asyncio.create_subprocess_shell(
-                    f"ssh -o StrictHostKeychecking=no {user}@{ip} '{c}'",
-                    shell=True,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await result.communicate()
+                async with asyncssh.connect(host=ip, username=user, password=password) as client:
+                    print("Executing commands for", ip)
+                    result = await client.run(c, check=True, timeout=exec_timeout)
+                    stdout, stderr = result.stdout, result.stderr
                 if result.returncode == 0:
                     print(f"Command success for -> {ip} - {vm_name}")
-                    print(stdout.decode())
-                    #print(stderr.decode())
+                    if log_to_console:
+                        print(stdout)
+                        # print(stderr)
                     #with open("success_commands.txt", "a") as success_file:
                         #success_file.write(f"Docker user added -> {ip} - {vm_name}\n")
                 else:
                     print(f"Error executing command for {ip} - {vm_name}:")
-                    print("STDOUT:")
-                    print(stdout.decode())
-                    print("STDERR:")
-                    print(stderr.decode())
+                    # print("STDOUT:")
+                    # print(stdout)
+                    # print("STDERR:")
+                    # print(stderr)
                     #with open("error_commands.txt", "a") as error_file:
                         #error_file.write(f"Error for {ip} - {vm_name}\n")
 
             except Exception as e:
                 print(f"Exception for {ip}: {e}")
                 
-async def async_gather_executor(
-    user: str,
-    ip: str,
-    cmd: Union[str, List[str]],
-    strict=True,
-    vm_name=None
-):
-    tasks = []
-    cmd_list = ["command1", "command2", "command3"] 
-    ip = "example_ip"
-    user = "example_user"
-    vm_name = "example_vm_name"
-    
-    for cmd in cmd_list:
-        task = exec_async_main_pipeline(ip, user, cmd, vm_name)
-        tasks.append(task)
-
-    await asyncio.gather(*tasks)
-        
     
 def exec_sync_main_pipeline(
     inv: Union[str, dict, list],
     user: str,
+    password: str,
+    conn_timeout: Union[int, None],
+    exec_timeout: Union[int, None],
     cmd_list: Union[str, List[str]],
     strict=True,
-    check_ssh_conn=True
+    check_ssh_conn=True,
+    log_to_console=True,
+    log_to_file=False,
     ):
     """Run the commands synchronously."""
     
     if isinstance(inv, dict):  
         for vm_name, ip in inv.items():
-            sync_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn, vm_name)
+            sync_cmd_exec(
+                ip,
+                cmd_list,
+                user,
+                password,
+                conn_timeout,
+                exec_timeout,
+                strict,
+                check_ssh_conn,
+                vm_name,
+                log_to_console=True,
+                log_to_file=False
+                )
                 
     elif isinstance(inv, list):
         for ip in inv:
-            sync_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn)
+            sync_cmd_exec(
+                ip,
+                cmd_list,
+                user,
+                password,
+                conn_timeout,
+                exec_timeout,
+                strict,
+                check_ssh_conn,
+                log_to_console,
+                log_to_file,
+                )
                 
     elif isinstance(inv, str):
         ip = inv
-        sync_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn)
+        sync_cmd_exec(
+            ip,
+            cmd_list,
+            user,
+            password,
+            conn_timeout,
+            exec_timeout,
+            strict,
+            check_ssh_conn,
+            log_to_console=True,
+            log_to_file=False
+            )
         
     else:
         raise TypeError(f"The inventory must be a dictionary, a list or a string. Found: {type(inv)}")
@@ -323,9 +349,14 @@ def exec_sync_main_pipeline(
 async def exec_async_main_pipeline(
     inv: Union[str, dict, list],
     user: str,
+    password: str,
+    conn_timeout: Union[int, None],
+    exec_timeout: Union[int, None],
     cmd_list: Union[str, List[str]],
     strict=True,
-    check_ssh_conn=True
+    check_ssh_conn=True,
+    log_to_console=True,
+    log_to_file=False,
     ):
     """Run the commands synchronously."""
     
@@ -333,19 +364,57 @@ async def exec_async_main_pipeline(
     
     if isinstance(inv, dict):  
         for vm_name, ip in inv.items():
-            tasks.append(async_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn, vm_name))
-            # await async_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn, vm_name)
+            tasks.append(
+                async_cmd_exec(
+                    ip,
+                    cmd_list,
+                    user,
+                    password,
+                    conn_timeout,
+                    exec_timeout,
+                    strict,
+                    check_ssh_conn,
+                    vm_name,
+                    log_to_console=True,
+                    log_to_file=False
+                    )
+                )
         await asyncio.gather(*tasks)
                 
     elif isinstance(inv, list):
         for ip in inv:
-            tasks.append(async_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn))
+            tasks.append(
+                async_cmd_exec(
+                    ip,
+                    cmd_list,
+                    user,
+                    password,
+                    conn_timeout,
+                    exec_timeout,
+                    strict,
+                    check_ssh_conn,
+                    log_to_console=True,
+                    log_to_file=False
+                    )
+                )
             # await async_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn)
         await asyncio.gather(*tasks)
                 
     elif isinstance(inv, str):
         ip = inv
-        tasks = [async_cmd_exec(user, ip, cmd_list, strict, check_ssh_conn)]
+        tasks = [async_cmd_exec(
+                    ip,
+                    cmd_list,
+                    user,
+                    password,
+                    conn_timeout,
+                    exec_timeout,
+                    strict,
+                    check_ssh_conn,
+                    log_to_console=True,
+                    log_to_file=False
+                )
+            ]
         await asyncio.gather(*tasks)
         
     else:

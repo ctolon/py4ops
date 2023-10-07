@@ -8,6 +8,8 @@ import sys
 from os.path import join
 import platform
 
+from setuptools.command.install import install
+
 from setuptools import Command, setup, find_packages
 DISTNAME = "py4ops"
 DESCRIPTION = "A python Library for Automating Tasks on remote hosts."
@@ -24,6 +26,29 @@ PROJECT_URLS = {
     "Source Code": "https://github.com/ctolon/py4ops",
 }
 VERSION = "0.0.1"
+
+def post_install():
+    import os
+    os.system('eval "$(register-py4ops-completion)"')
+
+class PostInstallCommand(install):
+    def run(self):
+        install.run(self)
+        self.execute(post_install, (), msg="Running post install task")
+        
+class EnableCompletionCommand(Command):
+    description = "Enable shell completion for py4ops"
+
+    def run(self):
+        import click_completion
+        click_completion.init()
+        print("Shell completion for py4ops is enabled.")
+        
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
 
 
 # Custom clean command to remove build artifacts
@@ -68,14 +93,12 @@ class CleanCommand(Command):
                     
 cmdclass = {
     "clean": CleanCommand,
+    "enable_completion": EnableCompletionCommand,
 }
 
             
 def setup_package():
     
-    # python_requires = ">=3.6"
-    # required_python_version = (3, 6)
-
     metadata = dict(
         name=DISTNAME,
         maintainer=MAINTAINER,
@@ -89,8 +112,13 @@ def setup_package():
         download_url=DOWNLOAD_URL,
         project_urls=PROJECT_URLS,
         version=VERSION,
+        entry_points={
+            "console_scripts": [
+                "py4ops = py4ops.__main__:py4ops",
+            ]
+        },
         # package_dir={"py4ops": "py4ops"},
-        keywords=["configuration management", "automation", "secure shell"],
+        keywords=["configuration management", "automation", "secure shell", "asyncio"],
         packages=find_packages(),
         classifiers=[
             "Intended Audience :: Developers",
@@ -98,7 +126,6 @@ def setup_package():
             "License :: OSI Approved :: Apache Software License",
             "Programming Language :: Python",
             "Topic :: Software Development",
-            'Topic :: System :: Distributed Computing',
             "Topic :: Scientific/Engineering",
             "Development Status :: 4 - Beta",
             "Operating System :: Microsoft :: Windows",
@@ -117,7 +144,7 @@ def setup_package():
         ],
         cmdclass=cmdclass,
         # python_requires=python_requires,
-        #install_requires=['paramiko>=4'],
+        install_requires=['paramiko', 'asyncssh', 'pyyaml'],
         package_data={"": ["*.csv", "*.gz", "*.txt", "*.pxd", "*.md", "*.jpg"]},
         zip_safe=False,  # the package can run out of an .egg file
         # extras_require={"with_paramiko": ["paramiko"]}
