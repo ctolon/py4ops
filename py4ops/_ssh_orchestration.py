@@ -12,6 +12,22 @@ import asyncssh
 from ._checkers import is_valid_ip_address, is_valid_ipv4_address, is_valid_ipv6_address, check_ssh
 
 
+
+def call_check_ssh(ip, strict, conn_timeout, only_error, show_info):
+    
+    err_found = False
+    if not only_error:
+        print(f"Checking connection to {ip}...")
+    val = check_ssh(server_ip=ip, timeout=conn_timeout)
+    if val is False:
+        err_found = True
+        if strict:
+            raise ConnectionError(f"Cannot connect to {ip}")
+        else:
+            print(f"Cannot connect to {ip}, skipping...")
+            return
+    return True
+            
 def reverse_dict(d: dict) -> dict:
     """Reverse a dictionary."""
     
